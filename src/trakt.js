@@ -4,6 +4,9 @@ import { getToken, saveToken } from './db.js';
 const CLIENT_ID = process.env.TRAKT_CLIENT_ID;
 const CLIENT_SECRET = process.env.TRAKT_CLIENT_SECRET;
 const TRAKT_API_BASE = 'https://api.trakt.tv';
+const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const TMDB_API_BASE = 'https://api.themoviedb.org/3';
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
 // In-memory cache with 5 minute TTL
 let cache = { data: null, timestamp: 0 };
@@ -17,6 +20,10 @@ export async function initialize() {
   
   if (!CLIENT_ID || !CLIENT_SECRET) {
     throw new Error('Missing TRAKT_CLIENT_ID or TRAKT_CLIENT_SECRET');
+  }
+  
+  if (!TMDB_API_KEY) {
+    console.warn('[WARN] TMDB_API_KEY not found - poster images will not be available');
   }
   
   console.log('[INFO] Trakt API credentials verified');
@@ -61,6 +68,42 @@ async function refreshAccessToken() {
 
   console.log('[INFO] Access token refreshed successfully');
   return data.access_token;
+}
+
+/**
+ * Fetch poster image from TMDB
+ * @param {string} type - 'movie' or 'tv'
+ * @param {number} tmdbId - TMDB ID
+ * @returns {Promise<string|null>} Poster URL or null
+ */
+async function fetchPosterFromTMDB(type, tmdbId) {
+  if (!TMDB_API_KEY || !tmdbId) {
+    return null;
+  }
+
+  try {
+    const endpoint = type === 'movie' 
+      ? `${TMDB_API_BASE}/movie/${tmdbId}`
+      : `${TMDB_API_BASE}/tv/${tmdbId}`;
+    
+    const response = await fetch(`${endpoint}?api_key=${TMDB_API_KEY}`);
+    
+    if (!response.ok) {
+      console.warn(`[WARN] Failed to fetch TMDB data for ${type} ${tmdbId}`);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (data.poster_path) {
+      return `${TMDB_IMAGE_BASE}${data.poster_path}`;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[ERROR] TMDB fetch failed: ${error.message}`);
+    return null;
+  }
 }
 
 /**
@@ -124,10 +167,14 @@ async function fetchHistory(accessToken) {
     const movie = latest.payload.movie;
     console.log(`[INFO] Last watched: ${movie.title} (${movie.year})`);
     
+    // Fetch poster from TMDB if available
+    const posterUrl = await fetchPosterFromTMDB('movie', movie.ids?.tmdb);
+    
     return {
       type: 'movie',
       title: movie.title,
       year: movie.year,
+      poster_url: posterUrl,
       trakt_url: movie.ids?.slug 
         ? `https://trakt.tv/movies/${movie.ids.slug}` 
         : null,
@@ -143,6 +190,9 @@ async function fetchHistory(accessToken) {
     
     console.log(`[INFO] Last watched: ${show.title} S${ep.season}E${ep.number}`);
     
+    // Fetch show poster from TMDB if available
+    const posterUrl = await fetchPosterFromTMDB('tv', show.ids?.tmdb);
+    
     return {
       type: 'episode',
       title,
@@ -150,6 +200,7 @@ async function fetchHistory(accessToken) {
       season: ep.season,
       episode: ep.number,
       year: show.year,
+      poster_url: posterUrl,
       trakt_url: url,
       watched_at: latest.watched_at
     };
