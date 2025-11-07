@@ -1,6 +1,6 @@
 # Trakt API
 
-Express API server that fetches your last watched movie or TV episode from Trakt.tv with poster images from TMDB.
+Express API server that fetches your last watched movie or TV episode from Trakt.tv with poster images from TMDB. Make use of Render for deploying trakt-api as it's free hosting alternative and Neon for trakt-db.
 
 ## Features
 
