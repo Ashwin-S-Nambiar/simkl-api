@@ -12,9 +12,7 @@ const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 let cache = { data: null, timestamp: 0 };
 const CACHE_TTL = 300000; // 5 minutes in milliseconds
 
-/**
- * Initialize and verify Trakt API credentials
- */
+// Initialize and verify Trakt API credentials
 export async function initialize() {
   console.log('[INFO] Initializing Trakt API...');
   

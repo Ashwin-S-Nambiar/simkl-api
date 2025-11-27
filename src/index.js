@@ -68,7 +68,7 @@ app.listen(PORT, () => {
   
   // Self-ping to prevent Render free tier spin-down
   if (process.env.NODE_ENV === 'production') {
-    const SELF_PING_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    const SELF_PING_INTERVAL = 14 * 60 * 1000; // 14 minutes
     const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
     
     setInterval(async () => {

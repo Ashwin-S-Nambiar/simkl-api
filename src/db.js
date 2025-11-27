@@ -107,9 +107,7 @@ export async function saveToken(newToken) {
   }
 }
 
-/**
- * Close database connection (for graceful shutdown)
- */
+// Close database connection (for graceful shutdown)
 export async function closeDatabase() {
   if (pool) {
     await pool.end();

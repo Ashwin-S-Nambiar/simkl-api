@@ -8,7 +8,7 @@ Express API server that fetches your last watched movie or TV episode from Trakt
 - Enriches data with poster images from TMDB
 - Token auto-refresh with PostgreSQL persistence
 - 5-minute response caching
-- Self-ping to prevent Render free tier spin-down
+- Self-ping every 14 minutes to prevent Render free tier spin-down
 
 ## Prerequisites
 
@@ -37,9 +37,11 @@ RENDER_EXTERNAL_URL=https://your-render-app.onrender.com
 ## API Endpoints
 
 ### `GET /api/trakt/last`
+
 Returns the last watched movie or episode.
 
 **Response:**
+
 ```json
 {
   "ok": true,
@@ -55,11 +57,13 @@ Returns the last watched movie or episode.
 ```
 
 ### `GET /health`
+
 Health check endpoint.
 
 ## Token Setup
 
 Run `get-token.js` to obtain your initial Trakt refresh token:
+
 ```bash
 node get-token.js
 ```
