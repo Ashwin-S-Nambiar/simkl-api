@@ -194,8 +194,21 @@ async function fetchHistory(accessToken) {
     fetch(`${TRAKT_API_BASE}/sync/history/episodes?limit=1`, { headers })
   ]);
 
+  if (!moviesRes.ok) {
+    const body = await moviesRes.text().catch(() => '');
+    console.error(`[ERROR] Movies history failed: ${moviesRes.status} ${moviesRes.statusText} - ${body}`);
+  }
+  if (!episodesRes.ok) {
+    const body = await episodesRes.text().catch(() => '');
+    console.error(`[ERROR] Episodes history failed: ${episodesRes.status} ${episodesRes.statusText} - ${body}`);
+  }
+
   if (!moviesRes.ok && !episodesRes.ok) {
-    throw new Error('Failed to fetch history from Trakt API');
+    const status = moviesRes.status;
+    if (status === 401 || status === 403) {
+      throw new Error(`AUTH_FAILED:${status}`);
+    }
+    throw new Error(`Failed to fetch history from Trakt API (movies: ${moviesRes.status}, episodes: ${episodesRes.status})`);
   }
 
   const movies = moviesRes.ok ? await moviesRes.json() : [];
@@ -276,6 +289,16 @@ async function fetchHistory(accessToken) {
 }
 
 /**
+ * Force a fresh access token by clearing caches and refreshing
+ * @returns {Promise<string>} New access token
+ */
+async function forceTokenRefresh() {
+  console.log('[INFO] Forcing token refresh due to auth failure...');
+  accessTokenCache = { token: null, expiresAt: 0 };
+  return doRefreshAccessToken();
+}
+
+/**
  * Get last watched item with caching
  * @returns {Promise<Object|null>} Last watched item
  */
@@ -290,7 +313,19 @@ export async function getLastWatched() {
 
   console.log('[INFO] Cache expired or empty, fetching fresh data...');
   const accessToken = await getValidAccessToken();
-  const data = await fetchHistory(accessToken);
+
+  let data;
+  try {
+    data = await fetchHistory(accessToken);
+  } catch (error) {
+    if (error.message.startsWith('AUTH_FAILED:')) {
+      console.log('[WARN] Access token rejected by Trakt, forcing refresh and retrying...');
+      const freshToken = await forceTokenRefresh();
+      data = await fetchHistory(freshToken);
+    } else {
+      throw error;
+    }
+  }
 
   // Update cache
   cache = { data, timestamp: Date.now() };
