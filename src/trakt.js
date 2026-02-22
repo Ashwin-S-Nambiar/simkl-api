@@ -7,6 +7,7 @@ const TRAKT_API_BASE = 'https://api.trakt.tv';
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const USER_AGENT = 'TraktWatchHistory/1.0 (+https://ashwin.co.in)';
 
 // In-memory cache with 5 minute TTL
 let cache = { data: null, timestamp: 0 };
@@ -86,7 +87,10 @@ async function doRefreshAccessToken() {
 
   const response = await fetch(`${TRAKT_API_BASE}/oauth/token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': USER_AGENT
+    },
     body: JSON.stringify({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
@@ -154,7 +158,9 @@ async function fetchPosterFromTMDB(type, tmdbId) {
       ? `${TMDB_API_BASE}/movie/${tmdbId}`
       : `${TMDB_API_BASE}/tv/${tmdbId}`;
 
-    const response = await fetch(`${endpoint}?api_key=${TMDB_API_KEY}`);
+    const response = await fetch(`${endpoint}?api_key=${TMDB_API_KEY}`, {
+      headers: { 'User-Agent': USER_AGENT }
+    });
 
     if (!response.ok) {
       console.warn(`[WARN] Failed to fetch TMDB data for ${type} ${tmdbId}`);
@@ -182,6 +188,7 @@ async function fetchPosterFromTMDB(type, tmdbId) {
 async function fetchHistory(accessToken) {
   const headers = {
     'Content-Type': 'application/json',
+    'User-Agent': USER_AGENT,
     'trakt-api-version': '2',
     'trakt-api-key': CLIENT_ID,
     'Authorization': `Bearer ${accessToken}`
