@@ -155,7 +155,15 @@ export async function withAdvisoryLock(lockId, fn) {
     return fn();
   }
 
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (error) {
+    // pg surfaces some connection failures with an empty message, which turns
+    // into a useless `{"ok":false,"error":""}` response further up
+    throw new Error(`Database unavailable: ${error.message || error.code || 'connection failed'}`);
+  }
+
   try {
     await client.query('SELECT pg_advisory_lock($1)', [lockId]);
     return await fn();
