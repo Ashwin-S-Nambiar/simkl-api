@@ -5,6 +5,9 @@ const ACCESS_TOKEN = process.env.SIMKL_ACCESS_TOKEN;
 // Overridable so the provider can be pointed at a mock server in tests
 const SIMKL_API_BASE = process.env.SIMKL_API_BASE || 'https://api.simkl.com';
 const SIMKL_IMAGE_BASE = 'https://simkl.in/posters';
+const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const TMDB_API_BASE = 'https://api.themoviedb.org/3';
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
 const APP_NAME = 'simkl-api';
 const APP_VERSION = '1.0';
@@ -38,6 +41,10 @@ export async function initialize() {
 
   if (!ACCESS_TOKEN) {
     throw new Error('Missing SIMKL_ACCESS_TOKEN - run: node get-simkl-token.js');
+  }
+
+  if (!TMDB_API_KEY) {
+    console.warn('[WARN] TMDB_API_KEY not found - falling back to Simkl posters');
   }
 
   console.log('[INFO] Simkl API credentials verified');
@@ -152,34 +159,60 @@ function parseEpisodeMarker(marker) {
 }
 
 /**
- * Build the poster URL from Simkl's own image path.
- * Simkl poster paths look like "24/24273cee77f9d9f". The _m size is 340px wide,
- * ample for the 100x150 widget even at 2x DPR, and webp is roughly 40% smaller
- * than the equivalent jpg. No network call is needed to construct this.
+ * Fetch a poster, preferring TMDB and falling back to Simkl's own image
+ * @param {string} type - 'movie' or 'tv'
  * @param {Object} media - Simkl media object
- * @returns {string|null} Poster URL or null
+ * @returns {Promise<string|null>} Poster URL or null
  */
-function posterUrlFor(media) {
-  if (!media.poster) {
-    return null;
+async function fetchPoster(type, media) {
+  const tmdbId = media.ids?.tmdb;
+
+  if (TMDB_API_KEY && tmdbId) {
+    try {
+      const endpoint = type === 'movie'
+        ? `${TMDB_API_BASE}/movie/${tmdbId}`
+        : `${TMDB_API_BASE}/tv/${tmdbId}`;
+
+      const response = await fetch(`${endpoint}?api_key=${TMDB_API_KEY}`, {
+        headers: { 'User-Agent': USER_AGENT }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.poster_path) {
+          return `${TMDB_IMAGE_BASE}${data.poster_path}`;
+        }
+      } else {
+        console.warn(`[WARN] Failed to fetch TMDB data for ${type} ${tmdbId}`);
+      }
+    } catch (error) {
+      console.error(`[ERROR] TMDB fetch failed: ${error.message}`);
+    }
   }
 
-  return `${SIMKL_IMAGE_BASE}/${media.poster}_m.webp`;
+  // Simkl poster paths look like "24/24273cee77f9d9f". The _m size is 340px
+  // wide - ample for the 100x150 widget even at 2x DPR - and webp is roughly
+  // 40% smaller than the equivalent jpg.
+  if (media.poster) {
+    return `${SIMKL_IMAGE_BASE}/${media.poster}_m.webp`;
+  }
+
+  return null;
 }
 
 /**
  * Shape a Simkl entry into the response format the portfolio consumes
  * @param {Object} entry - Entry from collectEntries
- * @returns {Object} Normalised last-watched payload
+ * @returns {Promise<Object>} Normalised last-watched payload
  */
-function normaliseEntry(entry) {
+async function normaliseEntry(entry) {
   const { media, watchedAt, lastWatched, isMovie } = entry;
   const slug = media.ids?.slug;
 
   if (isMovie) {
     console.log(`[INFO] Last watched: ${media.title} (${media.year})`);
 
-    const posterUrl = posterUrlFor(media);
+    const posterUrl = await fetchPoster('movie', media);
     const url = slug ? `https://simkl.com/movies/${slug}` : null;
 
     return {
@@ -199,7 +232,7 @@ function normaliseEntry(entry) {
 
   console.log(`[INFO] Last watched: ${title}`);
 
-  const posterUrl = posterUrlFor(media);
+  const posterUrl = await fetchPoster('tv', media);
   const url = slug ? `https://simkl.com/tv/${slug}` : null;
 
   return {
@@ -270,7 +303,7 @@ export async function getLastWatched() {
     return null;
   }
 
-  const data = normaliseEntry(entry);
+  const data = await normaliseEntry(entry);
   cache = { data, timestamp: Date.now() };
 
   return data;

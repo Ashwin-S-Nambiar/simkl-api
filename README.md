@@ -1,6 +1,6 @@
 # Simkl API
 
-Express API server that fetches the last movie, show or anime I watched from [Simkl](https://simkl.com/), including poster art. Deployed on Render's free tier and consumed by the last-watched widget on [ashwin.co.in](https://ashwin.co.in).
+Express API server that fetches the last movie, show or anime I watched from [Simkl](https://simkl.com/), with poster art from TMDB. Deployed on Render's free tier and consumed by the last-watched widget on [ashwin.co.in](https://ashwin.co.in).
 
 > The service is still served from `trakt.ashwin.co.in`. Only the hostname is a
 > leftover from the Trakt era — the API itself talks exclusively to Simkl.
@@ -8,7 +8,7 @@ Express API server that fetches the last movie, show or anime I watched from [Si
 ## Features
 
 - Fetches last watched content across shows, anime and movies
-- Poster art straight from Simkl (no second API call on the request path)
+- Enriches data with poster images from TMDB, falling back to Simkl posters
 - 5-minute response caching
 - Self-ping every 14 minutes to prevent Render free tier spin-down
 - No database required — Simkl access tokens do not rotate
@@ -17,6 +17,7 @@ Express API server that fetches the last movie, show or anime I watched from [Si
 
 - Node.js >= 18.0.0
 - A Simkl API app (free — <https://simkl.com/settings/developer/new/>)
+- TMDB API key (optional — for higher quality posters)
 
 ## Environment Variables
 
@@ -26,6 +27,7 @@ SIMKL_CLIENT_ID=your_simkl_client_id
 SIMKL_ACCESS_TOKEN=your_simkl_access_token
 
 # Optional
+TMDB_API_KEY=your_tmdb_api_key
 FRONTEND_URL=https://your-frontend-url.com
 PORT=3001
 NODE_ENV=production
@@ -65,7 +67,7 @@ Returns the last watched movie or episode.
     "type": "movie",
     "title": "Dune: Part Two",
     "year": 2024,
-    "poster_url": "https://simkl.in/posters/.../..._m.webp",
+    "poster_url": "https://image.tmdb.org/t/p/w500/...",
     "url": "https://simkl.com/movies/dune-part-two",
     "watched_at": "2026-08-01T09:00:00Z"
   }
