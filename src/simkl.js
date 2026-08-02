@@ -1,9 +1,6 @@
-import fetch from 'node-fetch';
-
 const CLIENT_ID = process.env.SIMKL_CLIENT_ID;
 const ACCESS_TOKEN = process.env.SIMKL_ACCESS_TOKEN;
-// Overridable so the provider can be pointed at a mock server in tests
-const SIMKL_API_BASE = process.env.SIMKL_API_BASE || 'https://api.simkl.com';
+const SIMKL_API_BASE = 'https://api.simkl.com';
 const SIMKL_IMAGE_BASE = 'https://simkl.in/posters';
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
@@ -122,8 +119,8 @@ function collectEntries(payload) {
     if (!Array.isArray(items)) continue;
 
     for (const item of items) {
-      // Movies come back under `movie`, shows and anime under `show`
-      const media = item.movie || item.show || item.anime;
+      // Movies come back under `movie`, shows and anime both under `show`
+      const media = item.movie || item.show;
       if (!media) continue;
 
       const watchedAt = item.last_watched_at;
