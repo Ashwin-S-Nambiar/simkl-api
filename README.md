@@ -9,7 +9,6 @@ Base URL: <https://simkl.ashwin.co.in>
 - Fetches last watched content across shows, anime and movies
 - Enriches data with poster images from TMDB, falling back to Simkl posters
 - 5-minute response caching
-- Self-ping every 14 minutes to prevent Render free tier spin-down
 - No database required — Simkl access tokens do not rotate
 
 ## Prerequisites
@@ -30,15 +29,10 @@ TMDB_API_KEY=your_tmdb_api_key
 FRONTEND_URL=https://ashwin.co.in
 PORT=3001
 NODE_ENV=production
-RENDER_EXTERNAL_URL=https://simkl.ashwin.co.in
 ```
 
 `FRONTEND_URL` is the CORS allow-list entry, so it holds the *portfolio* origin —
 `http://localhost:3000` is always allowed alongside it for local work.
-
-`RENDER_EXTERNAL_URL` is only the self-ping target. Render injects it
-automatically with the `*.onrender.com` hostname; setting it explicitly to the
-custom domain keeps the keep-alive request on the public URL.
 
 ## Token Setup
 
@@ -87,7 +81,11 @@ revoked, which is the only condition requiring manual intervention.
 
 ### `GET /health`
 
-Health check endpoint.
+Health check endpoint. Also the keep-alive target: an external UptimeRobot
+monitor polls it every 5 minutes, which is what stops Render's free tier from
+spinning the instance down after 15 idle minutes. Nothing in this codebase keeps
+the service awake, so if the widget starts showing cold starts, check the monitor
+before the code.
 
 ## Notes
 

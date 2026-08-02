@@ -76,23 +76,4 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   console.log(`[INFO] Watch history API server running on port ${PORT}`);
   console.log(`[INFO] Environment: ${process.env.NODE_ENV || 'development'}`);
-  
-  // Self-ping to prevent Render free tier spin-down
-  if (process.env.NODE_ENV === 'production') {
-    const SELF_PING_INTERVAL = 14 * 60 * 1000; // 14 minutes
-    const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-    
-    setInterval(async () => {
-      try {
-        const response = await fetch(`${SERVICE_URL}/health`);
-        if (response.ok) {
-          console.log('[INFO] Self-ping successful - keeping service alive');
-        }
-      } catch (error) {
-        console.error('[WARN] Self-ping failed:', error.message);
-      }
-    }, SELF_PING_INTERVAL);
-    
-    console.log('[INFO] Self-ping enabled - service will stay active');
-  }
 });
