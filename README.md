@@ -2,8 +2,7 @@
 
 Express API server that fetches the last movie, show or anime I watched from [Simkl](https://simkl.com/), with poster art from TMDB. Deployed on Render's free tier and consumed by the last-watched widget on [ashwin.co.in](https://ashwin.co.in).
 
-> The service is still served from `trakt.ashwin.co.in`. Only the hostname is a
-> leftover from the Trakt era — the API itself talks exclusively to Simkl.
+Base URL: <https://simkl.ashwin.co.in>
 
 ## Features
 
@@ -28,11 +27,18 @@ SIMKL_ACCESS_TOKEN=your_simkl_access_token
 
 # Optional
 TMDB_API_KEY=your_tmdb_api_key
-FRONTEND_URL=https://your-frontend-url.com
+FRONTEND_URL=https://ashwin.co.in
 PORT=3001
 NODE_ENV=production
-RENDER_EXTERNAL_URL=https://your-render-app.onrender.com
+RENDER_EXTERNAL_URL=https://simkl.ashwin.co.in
 ```
+
+`FRONTEND_URL` is the CORS allow-list entry, so it holds the *portfolio* origin —
+`http://localhost:3000` is always allowed alongside it for local work.
+
+`RENDER_EXTERNAL_URL` is only the self-ping target. Render injects it
+automatically with the `*.onrender.com` hostname; setting it explicitly to the
+custom domain keeps the keep-alive request on the public URL.
 
 ## Token Setup
 
