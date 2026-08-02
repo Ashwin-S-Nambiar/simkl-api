@@ -28,13 +28,12 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
 
 // Verify credentials on startup
 await initialize();
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString()
@@ -42,7 +41,7 @@ app.get('/health', (req, res) => {
 });
 
 // Main API endpoint
-app.get('/api/watch/last', async (req, res) => {
+app.get('/api/watch/last', async (_req, res) => {
   try {
     const data = await getLastWatched();
     res.json({ ok: true, data });
@@ -66,7 +65,7 @@ app.get('/api/watch/last', async (req, res) => {
 });
 
 // 404 handler
-app.use((req, res) => {
+app.use((_req, res) => {
   res.status(404).json({ 
     ok: false, 
     error: 'Not found' 
