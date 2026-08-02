@@ -1,22 +1,10 @@
+// Must come first: simkl.js reads process.env at module scope, and ES module
+// imports are evaluated in order before any statement in this file runs.
+import 'dotenv/config';
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-// Pick the watch-history provider. Simkl is preferred because its tokens do not
-// rotate; Trakt is kept as a fallback. Imported dynamically so the unused
-// provider never runs its module-level setup (Trakt opens a Postgres pool).
-const PROVIDER = (process.env.WATCH_PROVIDER || (process.env.SIMKL_ACCESS_TOKEN ? 'simkl' : 'trakt')).toLowerCase();
-
-if (!['simkl', 'trakt'].includes(PROVIDER)) {
-  console.error(`[ERROR] Unknown WATCH_PROVIDER "${PROVIDER}" - expected "simkl" or "trakt"`);
-  process.exit(1);
-}
-
-console.log(`[INFO] Watch history provider: ${PROVIDER}`);
-
-const { getLastWatched, initialize } = await import(`./${PROVIDER}.js`);
+import { getLastWatched, initialize } from './simkl.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,25 +30,22 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Initialize database on startup
+// Verify credentials on startup
 await initialize();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    provider: PROVIDER,
     timestamp: new Date().toISOString()
   });
 });
 
-// Main API endpoint.
-// `/api/watch/last` is the provider-neutral path; `/api/trakt/last` is kept as
-// an alias so the deployed portfolio keeps working during the migration.
-app.get(['/api/watch/last', '/api/trakt/last'], async (req, res) => {
+// Main API endpoint
+app.get('/api/watch/last', async (req, res) => {
   try {
     const data = await getLastWatched();
-    res.json({ ok: true, provider: PROVIDER, data });
+    res.json({ ok: true, data });
   } catch (error) {
     console.error('[ERROR] API request failed:', error.message);
 
@@ -89,7 +74,7 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[INFO] Trakt API server running on port ${PORT}`);
+  console.log(`[INFO] Watch history API server running on port ${PORT}`);
   console.log(`[INFO] Environment: ${process.env.NODE_ENV || 'development'}`);
   
   // Self-ping to prevent Render free tier spin-down

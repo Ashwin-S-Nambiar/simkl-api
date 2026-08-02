@@ -9,7 +9,7 @@ const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
-const APP_NAME = 'trakt-api';
+const APP_NAME = 'simkl-api';
 const APP_VERSION = '1.0';
 const USER_AGENT = `WatchHistory/${APP_VERSION} (+https://ashwin.co.in)`;
 
@@ -21,7 +21,7 @@ export class ReauthRequiredError extends Error {
   }
 }
 
-// In-memory cache with 5 minute TTL (matches the Trakt provider)
+// In-memory cache with 5 minute TTL
 let cache = { data: null, timestamp: 0 };
 const CACHE_TTL = 300000;
 
@@ -190,16 +190,18 @@ async function fetchPoster(type, media) {
     }
   }
 
-  // Simkl poster paths look like "24/24273cee77f9d9f"
+  // Simkl poster paths look like "24/24273cee77f9d9f". The _m size is 340px
+  // wide - ample for the 100x150 widget even at 2x DPR - and webp is roughly
+  // 40% smaller than the equivalent jpg.
   if (media.poster) {
-    return `${SIMKL_IMAGE_BASE}/${media.poster}_m.jpg`;
+    return `${SIMKL_IMAGE_BASE}/${media.poster}_m.webp`;
   }
 
   return null;
 }
 
 /**
- * Shape a Simkl entry into the response format the portfolio already consumes
+ * Shape a Simkl entry into the response format the portfolio consumes
  * @param {Object} entry - Entry from collectEntries
  * @returns {Promise<Object>} Normalised last-watched payload
  */
@@ -219,7 +221,6 @@ async function normaliseEntry(entry) {
       year: media.year,
       poster_url: posterUrl,
       url,
-      trakt_url: url, // legacy key - keeps the existing portfolio widget working
       watched_at: watchedAt
     };
   }
@@ -243,7 +244,6 @@ async function normaliseEntry(entry) {
     year: media.year,
     poster_url: posterUrl,
     url,
-    trakt_url: url, // legacy key - keeps the existing portfolio widget working
     watched_at: watchedAt
   };
 }
