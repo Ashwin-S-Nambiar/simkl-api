@@ -142,20 +142,50 @@ function collectEntries(payload) {
 }
 
 /**
- * Parse Simkl's "S01E05" episode marker
+ * Parse Simkl's episode marker
+ *
+ * Two shapes come back. Seasoned shows - and anime scrobbled by clients that
+ * map to TMDB/TVDB numbering - use "S01E05". Anime tracked through Simkl itself
+ * uses absolute numbering with no season at all ("E366"), so a season-less
+ * result is normal rather than a parse failure.
+ *
  * @param {string|null} marker - Episode marker
- * @returns {{season: number, episode: number}|null} Parsed numbers or null
+ * @returns {{season: number|null, episode: number}|null} Parsed numbers or null
  */
 function parseEpisodeMarker(marker) {
   if (!marker) return null;
 
-  const match = /S(\d+)E(\d+)/i.exec(marker);
-  if (!match) return null;
+  const seasoned = /S(\d+)E(\d+)/i.exec(marker);
+  if (seasoned) {
+    return {
+      season: parseInt(seasoned[1], 10),
+      episode: parseInt(seasoned[2], 10)
+    };
+  }
 
-  return {
-    season: parseInt(match[1], 10),
-    episode: parseInt(match[2], 10)
-  };
+  const absolute = /^E(\d+)$/i.exec(marker.trim());
+  if (absolute) {
+    return {
+      season: null,
+      episode: parseInt(absolute[1], 10)
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Render a display title, omitting the season when there isn't one
+ * @param {string} title - Show title
+ * @param {{season: number|null, episode: number}|null} parsed - Parsed marker
+ * @returns {string} Display title
+ */
+function formatEpisodeTitle(title, parsed) {
+  if (!parsed) return title;
+
+  return parsed.season != null
+    ? `${title} S${parsed.season}E${parsed.episode}`
+    : `${title} E${parsed.episode}`;
 }
 
 /**
@@ -246,9 +276,7 @@ async function normaliseEntry(entry) {
   }
 
   const parsed = parseEpisodeMarker(lastWatched);
-  const title = parsed
-    ? `${media.title} S${parsed.season}E${parsed.episode}`
-    : media.title;
+  const title = formatEpisodeTitle(media.title, parsed);
 
   console.log(`[INFO] Last watched: ${title}`);
 
