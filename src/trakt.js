@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { getToken, saveToken, getAccessToken, saveAccessToken } from './db.js';
+import { getToken, saveToken, getAccessToken, saveAccessToken, withAdvisoryLock } from './db.js';
 
 const CLIENT_ID = process.env.TRAKT_CLIENT_ID;
 const CLIENT_SECRET = process.env.TRAKT_CLIENT_SECRET;
@@ -19,6 +19,23 @@ let refreshPromise = null;
 
 // In-memory access token cache (backup if DB fails)
 let accessTokenCache = { token: null, expiresAt: 0 };
+
+// Refresh tokens Trakt has already rejected. Retrying one is guaranteed to fail
+// and only burns rate limit, so short-circuit until a different token appears.
+const rejectedRefreshTokens = new Set();
+
+// Serialises refreshes across processes/instances, not just within one process.
+// Trakt refresh tokens are single-use, so two concurrent refreshes with the same
+// token leave one caller holding a token that was invalidated on arrival.
+const REFRESH_LOCK_ID = 4827301;
+
+export class ReauthRequiredError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ReauthRequiredError';
+    this.code = 'REAUTH_REQUIRED';
+  }
+}
 
 // Initialize and verify Trakt API credentials
 export async function initialize() {
@@ -76,11 +93,37 @@ async function getValidAccessToken() {
  * Actually perform the token refresh (internal function)
  * @returns {Promise<string>} New access token
  */
-async function doRefreshAccessToken() {
+async function doRefreshAccessToken(rejectedAccessToken = null) {
+  return withAdvisoryLock(REFRESH_LOCK_ID, () => refreshUnderLock(rejectedAccessToken));
+}
+
+/**
+ * Refresh body, executed while holding the cross-process lock
+ * @param {string|null} rejectedAccessToken - Access token Trakt just rejected, if any
+ * @returns {Promise<string>} New access token
+ */
+async function refreshUnderLock(rejectedAccessToken) {
+  // Another process may have refreshed while we waited for the lock. Reuse its
+  // result rather than spending our single-use refresh token on a second refresh.
+  const cachedToken = await getAccessToken();
+  if (
+    cachedToken &&
+    cachedToken.expiresAt > Date.now() + 60000 &&
+    cachedToken.token !== rejectedAccessToken
+  ) {
+    console.log('[INFO] Another process already refreshed the token, reusing it');
+    accessTokenCache = { token: cachedToken.token, expiresAt: cachedToken.expiresAt };
+    return cachedToken.token;
+  }
+
   const refreshToken = await getToken();
 
   if (!refreshToken) {
-    throw new Error('No refresh token found in database or environment. Please run get-token.js to generate a new token.');
+    throw new ReauthRequiredError('No refresh token found in database or environment. Please run get-token.js to generate a new token.');
+  }
+
+  if (rejectedRefreshTokens.has(refreshToken)) {
+    throw new ReauthRequiredError('Refresh token was already rejected by Trakt - please re-authenticate using get-token.js');
   }
 
   console.log('[INFO] Refreshing access token...');
@@ -106,16 +149,21 @@ async function doRefreshAccessToken() {
     try {
       const errorData = JSON.parse(errorText);
       if (errorData.error === 'invalid_grant') {
+        // Remember it so every later request fails fast instead of hammering Trakt
+        rejectedRefreshTokens.add(refreshToken);
         console.error('[ERROR] Refresh token is invalid or expired.');
         console.error('[ERROR] This can happen if:');
-        console.error('[ERROR]   1. The token was revoked by the user');
-        console.error('[ERROR]   2. The token expired after 6 months of inactivity');
-        console.error('[ERROR]   3. You re-authenticated and exceeded the token limit');
+        console.error('[ERROR]   1. A rotated refresh token was never persisted (crash/failed DB write)');
+        console.error('[ERROR]   2. Two instances refreshed at once, invalidating one copy');
+        console.error('[ERROR]   3. The token was revoked, or expired after 6 months of inactivity');
         console.error('[ERROR] Please run: node get-token.js to generate a new token');
-        throw new Error('Refresh token invalid - please re-authenticate using get-token.js');
+        throw new ReauthRequiredError('Refresh token invalid - please re-authenticate using get-token.js');
       }
     } catch (parseError) {
-      // If it's not JSON, just use the raw error
+      // Preserve the typed error; only fall through when the body was not JSON
+      if (parseError instanceof ReauthRequiredError) {
+        throw parseError;
+      }
     }
 
     throw new Error(`Token refresh failed: ${response.status} ${errorText}`);
@@ -127,15 +175,17 @@ async function doRefreshAccessToken() {
   const expiresIn = data.expires_in || 86400; // 24 hours in seconds
   const expiresAt = Date.now() + (expiresIn * 1000);
 
-  // Save new access token to database and memory
-  await saveAccessToken(data.access_token, expiresAt);
-  accessTokenCache = { token: data.access_token, expiresAt };
-
-  // Save new refresh token if it was rotated
+  // Persist the rotated refresh token FIRST. Trakt invalidated the old one the
+  // moment it answered, so if the process dies before this write lands there is
+  // no way back in without re-authenticating by hand.
   if (data.refresh_token && data.refresh_token !== refreshToken) {
     console.log('[INFO] New refresh token received, updating database...');
     await saveToken(data.refresh_token);
   }
+
+  // Save new access token to database and memory
+  await saveAccessToken(data.access_token, expiresAt);
+  accessTokenCache = { token: data.access_token, expiresAt };
 
   console.log('[INFO] Access token refreshed successfully');
   console.log(`[INFO] Token expires at: ${new Date(expiresAt).toISOString()}`);
@@ -299,10 +349,10 @@ async function fetchHistory(accessToken) {
  * Force a fresh access token by clearing caches and refreshing
  * @returns {Promise<string>} New access token
  */
-async function forceTokenRefresh() {
+async function forceTokenRefresh(rejectedAccessToken) {
   console.log('[INFO] Forcing token refresh due to auth failure...');
   accessTokenCache = { token: null, expiresAt: 0 };
-  return doRefreshAccessToken();
+  return doRefreshAccessToken(rejectedAccessToken);
 }
 
 /**
@@ -327,7 +377,7 @@ export async function getLastWatched() {
   } catch (error) {
     if (error.message.startsWith('AUTH_FAILED:')) {
       console.log('[WARN] Access token rejected by Trakt, forcing refresh and retrying...');
-      const freshToken = await forceTokenRefresh();
+      const freshToken = await forceTokenRefresh(accessToken);
       data = await fetchHistory(freshToken);
     } else {
       throw error;
