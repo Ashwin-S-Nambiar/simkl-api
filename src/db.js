@@ -14,11 +14,13 @@ function initializeDatabase() {
     return;
   }
 
+  // Enable SSL for any non-local host so local scripts (get-token.js) can
+  // reach a hosted database, not just the production deployment.
+  const isLocalDatabase = /@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL);
+
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production'
-      ? { rejectUnauthorized: false }
-      : false
+    ssl: isLocalDatabase ? false : { rejectUnauthorized: false }
   });
 
   // Create table if not exists
@@ -62,11 +64,10 @@ export async function getToken() {
       return result.rows[0].refresh_token;
     }
 
-    // If no token in DB, try environment variable
+    // If no token in DB, seed from the environment variable
     const envToken = process.env.TRAKT_REFRESH_TOKEN;
     if (envToken) {
-      console.log('[INFO] No token in database, using environment variable');
-      // Save to database for future use
+      console.log('[INFO] No token in database, seeding from environment variable');
       await saveToken(envToken);
       return envToken;
     }
@@ -74,9 +75,11 @@ export async function getToken() {
     console.log('[WARN] No refresh token found in database or environment');
     return null;
   } catch (error) {
+    // Never fall back to TRAKT_REFRESH_TOKEN on a read failure. Refresh tokens
+    // are single-use, so the env copy is almost always an already-rotated token;
+    // spending it would invalidate the good token sitting in the database.
     console.error('[ERROR] Failed to retrieve token from database:', error.message);
-    // Fallback to environment
-    return process.env.TRAKT_REFRESH_TOKEN || null;
+    throw new Error(`Could not read refresh token from database: ${error.message}`);
   }
 }
 
@@ -91,19 +94,78 @@ export async function saveToken(newToken) {
     return;
   }
 
-  try {
-    await pool.query(`
-      INSERT INTO tokens (id, refresh_token) 
-      VALUES (1, $1) 
-      ON CONFLICT (id) 
-      DO UPDATE SET 
-        refresh_token = $1, 
-        updated_at = CURRENT_TIMESTAMP
-    `, [newToken]);
+  // A failure here is unrecoverable: Trakt has already invalidated the previous
+  // refresh token, so losing this one locks the app out until re-authentication.
+  // Retry a few times, then surface the error instead of swallowing it.
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await pool.query(`
+        INSERT INTO tokens (id, refresh_token)
+        VALUES (1, $1)
+        ON CONFLICT (id)
+        DO UPDATE SET
+          refresh_token = $1,
+          updated_at = CURRENT_TIMESTAMP
+      `, [newToken]);
 
-    console.log('[INFO] Refresh token saved to database');
+      console.log('[INFO] Refresh token saved to database');
+      return;
+    } catch (error) {
+      lastError = error;
+      console.error(`[ERROR] Failed to save token to database (attempt ${attempt}/3):`, error.message);
+      if (attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, attempt * 500));
+      }
+    }
+  }
+
+  console.error('[ERROR] Refresh token could not be persisted. Save it manually or re-run get-token.js:');
+  console.error(`[ERROR] TRAKT_REFRESH_TOKEN=${newToken}`);
+  throw new Error(`Failed to persist rotated refresh token: ${lastError.message}`);
+}
+
+/**
+ * Remove the cached access token (used when seeding a brand new OAuth session)
+ * @returns {Promise<void>}
+ */
+export async function clearAccessToken() {
+  if (!pool) {
+    return;
+  }
+
+  try {
+    await pool.query('DELETE FROM access_tokens WHERE id = 1');
+    console.log('[INFO] Cached access token cleared');
   } catch (error) {
-    console.error('[ERROR] Failed to save token to database:', error.message);
+    // The table may not exist yet on a fresh database; that is equivalent to cleared.
+    console.log(`[INFO] No cached access token to clear (${error.message})`);
+  }
+}
+
+/**
+ * Run a callback while holding a database-wide advisory lock.
+ * Serialises token refreshes across processes and Render instances, which an
+ * in-memory lock cannot do. Falls through unlocked when there is no database.
+ * @param {number} lockId - Arbitrary but stable lock identifier
+ * @param {Function} fn - Callback to run under the lock
+ */
+export async function withAdvisoryLock(lockId, fn) {
+  if (!pool) {
+    return fn();
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock($1)', [lockId]);
+    return await fn();
+  } finally {
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [lockId]);
+    } catch (error) {
+      console.error('[ERROR] Failed to release advisory lock:', error.message);
+    }
+    client.release();
   }
 }
 

@@ -47,9 +47,19 @@ app.get('/api/trakt/last', async (req, res) => {
     res.json({ ok: true, data });
   } catch (error) {
     console.error('[ERROR] API request failed:', error.message);
-    res.status(500).json({ 
-      ok: false, 
-      error: error.message 
+
+    // Re-authentication is an operator action, not a transient server fault
+    if (error.code === 'REAUTH_REQUIRED') {
+      return res.status(503).json({
+        ok: false,
+        code: 'REAUTH_REQUIRED',
+        error: error.message
+      });
+    }
+
+    res.status(500).json({
+      ok: false,
+      error: error.message
     });
   }
 });

@@ -52,7 +52,7 @@ rl.question('\nSTEP 4: Enter the code here: ', async (code) => {
     }
     
     const data = await response.json();
-    
+
     console.log('\n' + '='.repeat(70));
     console.log('SUCCESS! Your tokens:');
     console.log('='.repeat(70));
@@ -63,10 +63,27 @@ rl.question('\nSTEP 4: Enter the code here: ', async (code) => {
     console.log('\nExpires in:', data.expires_in, 'seconds');
     console.log('Created at:', new Date(data.created_at * 1000).toLocaleString());
     console.log('\n' + '='.repeat(70));
-    console.log('NEXT STEP: Copy the REFRESH TOKEN above and paste it in your .env file:');
+
+    // The running server reads the database first and only falls back to the
+    // environment when no row exists, so a stale row would shadow this new token.
+    // Write it here (imported dynamically, after dotenv has populated DATABASE_URL).
+    if (process.env.DATABASE_URL) {
+      const { saveToken, clearAccessToken, closeDatabase } = await import('./src/db.js');
+      console.log('\n[INFO] DATABASE_URL found - writing token to the database...');
+      await saveToken(data.refresh_token);
+      await clearAccessToken();
+      await closeDatabase();
+      console.log('[INFO] Database updated. Restart the service and it will pick this up.');
+    } else {
+      console.log('\n[WARN] No DATABASE_URL set, so the database was NOT updated.');
+      console.log('[WARN] If your deployment uses a database, the old token there will');
+      console.log('[WARN] override the env var below. Set DATABASE_URL and re-run this.');
+    }
+
+    console.log('\nAlso update your .env / Render environment variable:');
     console.log('TRAKT_REFRESH_TOKEN=' + data.refresh_token);
     console.log('='.repeat(70));
-    
+
   } catch (error) {
     console.error('\n[ERROR]', error.message);
   }
