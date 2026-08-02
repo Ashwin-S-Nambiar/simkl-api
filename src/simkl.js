@@ -130,6 +130,9 @@ function collectEntries(payload) {
         watchedAt,
         media,
         lastWatched: item.last_watched || null,
+        // Anime lives in its own bucket but is shaped like a show, so keep the
+        // bucket around - it decides the simkl.com path segment later
+        bucket: key,
         isMovie: key === 'movies' || Boolean(item.movie)
       });
     }
@@ -153,6 +156,27 @@ function parseEpisodeMarker(marker) {
     season: parseInt(match[1], 10),
     episode: parseInt(match[2], 10)
   };
+}
+
+/**
+ * Build a canonical simkl.com link for a media item
+ *
+ * Simkl routes on the numeric id, not the slug - "/tv/my-show" does not resolve
+ * to the title page, it needs "/tv/1648284/my-show". The slug is cosmetic; the
+ * id alone works, so it is only appended when present.
+ *
+ * @param {string} segment - simkl.com path segment: 'movies', 'anime' or 'tv'
+ * @param {Object} media - Simkl media object
+ * @returns {string|null} Canonical URL or null when the id is missing
+ */
+function buildSimklUrl(segment, media) {
+  const simklId = media.ids?.simkl ?? media.ids?.simkl_id;
+  if (!simklId) return null;
+
+  const slug = media.ids?.slug;
+  return slug
+    ? `https://simkl.com/${segment}/${simklId}/${slug}`
+    : `https://simkl.com/${segment}/${simklId}`;
 }
 
 /**
@@ -203,14 +227,13 @@ async function fetchPoster(type, media) {
  * @returns {Promise<Object>} Normalised last-watched payload
  */
 async function normaliseEntry(entry) {
-  const { media, watchedAt, lastWatched, isMovie } = entry;
-  const slug = media.ids?.slug;
+  const { media, watchedAt, lastWatched, isMovie, bucket } = entry;
 
   if (isMovie) {
     console.log(`[INFO] Last watched: ${media.title} (${media.year})`);
 
     const posterUrl = await fetchPoster('movie', media);
-    const url = slug ? `https://simkl.com/movies/${slug}` : null;
+    const url = buildSimklUrl('movies', media);
 
     return {
       type: 'movie',
@@ -230,7 +253,7 @@ async function normaliseEntry(entry) {
   console.log(`[INFO] Last watched: ${title}`);
 
   const posterUrl = await fetchPoster('tv', media);
-  const url = slug ? `https://simkl.com/tv/${slug}` : null;
+  const url = buildSimklUrl(bucket === 'anime' ? 'anime' : 'tv', media);
 
   return {
     type: 'episode',
