@@ -1,7 +1,7 @@
 {
-  "name": "trakt-api",
+  "name": "simkl-api",
   "version": "1.0.0",
-  "description": "Express API for Trakt.tv integration",
+  "description": "Express API for Simkl watch-history integration",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "dev": "nodemon src/index.js"
   },
   "keywords": [
-    "trakt",
+    "simkl",
     "api",
     "express"
   ],
@@ -19,8 +19,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "node-fetch": "^3.3.2",
-    "pg": "^8.13.1"
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
