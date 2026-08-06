@@ -132,6 +132,14 @@ A `503` with `"code": "REAUTH_REQUIRED"` means Simkl rejected the token, almost 
 
 Returns `{ "status": "ok", "timestamp": "..." }`. Useful as an uptime monitor target, see below.
 
+### `GET /`
+
+Lists the endpoints above. This exists so that pasting the bare domain into a browser tells you what the service is instead of returning a 404 that looks like an outage.
+
+Do not point an uptime monitor at it. It is a static object and returns `200` even when the Simkl token is dead, which is exactly the failure you want a monitor to catch. Use `/health`.
+
+Anything else returns `404` with `{ "ok": false, "error": "Not found" }`.
+
 ## Deploying
 
 I run this on Render's free tier. Any Node host works.
