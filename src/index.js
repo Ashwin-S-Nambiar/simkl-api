@@ -32,6 +32,15 @@ app.use(cors({
 // Verify credentials on startup
 await initialize();
 
+app.get('/', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'simkl-api',
+    endpoints: ['/api/watch/last', '/health'],
+    docs: 'https://github.com/Ashwin-S-Nambiar/simkl-api'
+  });
+});
+
 // Health check endpoint
 app.get('/health', (_req, res) => {
   res.json({
