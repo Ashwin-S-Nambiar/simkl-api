@@ -65,7 +65,7 @@ that's the whole trick. everything else is caching, posters, and making the fail
 
 | layer | choices |
 | --- | --- |
-| server | [express 4](https://expressjs.com) on node 18+, esm with top level `await` |
+| server | [express 5](https://expressjs.com) on node 22+, esm with top level `await` |
 | data | the [simkl api](https://simkl.docs.apiary.io/), over global `fetch` |
 | posters | [tmdb](https://www.themoviedb.org/), with simkl's own artwork as the fallback |
 | auth | simkl's pin flow, run once by `get-simkl-token.js` |
@@ -104,7 +104,7 @@ you do this once. the token stays good until you revoke the app at <https://simk
 ### 3. run it
 
 ```sh
-npm run dev     # nodemon, reloads on change
+npm run dev     # node --watch, reloads on change
 npm start       # plain node
 curl http://localhost:3001/api/watch/last
 ```

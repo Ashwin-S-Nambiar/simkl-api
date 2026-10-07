@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const CLIENT_ID = process.env.SIMKL_CLIENT_ID;
 const SIMKL_API_BASE = 'https://api.simkl.com';
