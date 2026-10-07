@@ -1,10 +1,22 @@
-# simkl-api
+<p align="center">
+  <a href="https://simkl.ashwin.co.in/api/watch/last"><strong>simkl.ashwin.co.in</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#what-it-does">what it does</a>
+  &nbsp;·&nbsp;
+  <a href="#how-it-works">how it works</a>
+  &nbsp;·&nbsp;
+  <a href="#running-it">running it</a>
+</p>
 
-A small Express server that answers exactly one question: what did I watch last?
+<br>
 
-It reads my [Simkl](https://simkl.com/) history, picks the most recent thing across TV, anime and movies, attaches a poster, and hands it back as JSON. The "last watched" widget on [ashwin.co.in](https://ashwin.co.in) is the only thing that consumes it.
+the source of **[simkl.ashwin.co.in](https://simkl.ashwin.co.in/api/watch/last)**, a small express server that answers one question: what did i watch last?
 
-Live endpoint: <https://simkl.ashwin.co.in/api/watch/last>
+it reads my [simkl](https://simkl.com/) history, picks the newest thing across tv, anime and movies, attaches a poster, and hands it back as json. the last watched widget on [ashwin.co.in](https://ashwin.co.in) is the only thing that reads it.
+
+fork it, point it at your own simkl account, and you get the same thing for your site. setup takes about ten minutes, most of it waiting on a browser tab.
+
+## what it does
 
 ```json
 {
@@ -23,155 +35,134 @@ Live endpoint: <https://simkl.ashwin.co.in/api/watch/last>
 }
 ```
 
-Fork it, point it at your own Simkl account, and you get the same thing for your site. Setup takes about ten minutes, most of which is waiting on a browser tab.
+| route | what it is |
+| --- | --- |
+| `GET /api/watch/last` | the most recent movie or episode, as above |
+| `GET /health` | `{ "status": "ok", "timestamp": "..." }`, for an uptime monitor |
+| `GET /` | lists the routes, so the bare domain says what the service is instead of a 404 that looks like an outage |
+| anything else | `404` with `{ "ok": false, "error": "Not found" }` |
 
-## Why it exists
+- **two shapes.** `type` is `movie` or `episode`. movies return `title`, `year`, `poster_url`, `url` and `watched_at`. episodes add `show_title`, `season` and `episode`.
+- **season can be null.** anime tracked through simkl itself uses absolute numbering (`E366`) with no season. shows, and anime scrobbled by clients that map to tmdb or tvdb, come back as `S01E05` and fill both fields. if you build a ui on this, handle the null.
+- **one failure needs a human.** a `503` with `"code": "REAUTH_REQUIRED"` means simkl rejected the token, almost always because the app was revoked. run `get-simkl-token.js` again. anything else is a `500` with the message.
+- **don't monitor `/`.** it is a static object and returns `200` even when the token is dead, which is exactly what a monitor should catch. use `/health`.
 
-Simkl has no "give me the most recent item" endpoint. You can list your library, but you cannot sort it by recency or ask for the top result. So this service pulls the last 45 days from the three library buckets (`shows`, `anime`, `movies`), sorts them locally by `last_watched_at`, and takes the newest. If you have watched nothing in 45 days it falls back to a full history pull so the widget shows something instead of going blank.
+## one question, three requests
 
-That is the whole trick. Everything else here is caching, poster lookup, and making the failure modes legible.
+simkl has no "give me the latest item" endpoint. you can list your library, but you can't sort it by recency or ask for the top one. so this pulls the last 45 days from the three library buckets (`shows`, `anime`, `movies`), sorts them by `last_watched_at` here, and takes the newest. if nothing was watched in 45 days it falls back to the full history, so the widget shows something instead of going blank.
 
-## Requirements
+that's the whole trick. everything else is caching, posters, and making the failures readable.
 
-- Node.js 18 or newer (the code uses global `fetch`, ESM and top-level `await`)
-- A free Simkl account with some watch history on it
-- A [TMDB](https://www.themoviedb.org/) API key, optional, for nicer posters
+## how it works
 
-## Setup
+- **caching.** the answer is kept in memory for 5 minutes. simkl's limits are generous and my history doesn't change every second, so this mostly stops a busy page from hammering it. a restart clears it.
+- **posters.** tmdb first, when there's a key and the title has a `tmdb` id. simkl's cdn otherwise, `null` if neither has one. simkl posters are asked for as `_m.webp`, which is 340 px wide and about 40% smaller than the jpg.
+- **links.** simkl routes on the numeric id, so `/tv/my-show` doesn't resolve. it needs `/tv/1648284/my-show`, and the slug is only for show. anime gets `/anime/`, shows `/tv/`, movies `/movies/`.
+- **empty buckets.** simkl sends an empty body, not `{}`, when a bucket has nothing in it, so the response is read as text and checked before parsing. the kind of thing you only find out in production.
+- **fails at startup.** missing `SIMKL_CLIENT_ID` or `SIMKL_ACCESS_TOKEN` stops the server before it listens, with the name of what's missing. no tmdb key is a warning, and it carries on.
 
-### 1. Clone and install
+## the stack
 
-```bash
+| layer | choices |
+| --- | --- |
+| server | [express 4](https://expressjs.com) on node 18+, esm with top level `await` |
+| data | the [simkl api](https://simkl.docs.apiary.io/), over global `fetch` |
+| posters | [tmdb](https://www.themoviedb.org/), with simkl's own artwork as the fallback |
+| auth | simkl's pin flow, run once by `get-simkl-token.js` |
+| config | [dotenv](https://github.com/motdotla/dotenv), [cors](https://github.com/expressjs/cors) |
+| hosting | [render](https://render.com), free tier |
+
+no database. simkl tokens last about five years and there is no refresh token to rotate, so the token lives in an environment variable.
+
+## running it
+
+```sh
 git clone https://github.com/Ashwin-S-Nambiar/simkl-api.git
 cd simkl-api
 npm install
+cp .env.example .env
 ```
 
-### 2. Register a Simkl app
+### 1. register a simkl app
 
-Go to <https://simkl.com/settings/developer/new/> and pick **"Add a new app"**.
+go to <https://simkl.com/settings/developer/new/> and pick **add a new app**.
 
-Do not pick "Add a new website". It looks like the right choice and it is not. Website credentials get a reduced permission set that cannot read watch history, and the failure surfaces later as a confusing 403 rather than anything that mentions permissions. This cost me an afternoon.
+not **add a new website**. it looks like the right one and it isn't. website credentials get fewer permissions and can't read watch history, and that shows up later as a confusing `403` that never mentions permissions. this cost me an afternoon.
 
-Redirect URI does not matter for this flow, so put anything valid such as `urn:ietf:wg:oauth:2.0:oob`.
+the redirect uri doesn't matter for this flow, so put anything valid, like `urn:ietf:wg:oauth:2.0:oob`. copy the client id into `.env` as `SIMKL_CLIENT_ID`.
 
-Copy the client ID it gives you.
+### 2. get a token
 
-### 3. Create your .env
-
-```bash
-cp .env.example .env   # or just create the file
-```
-
-```env
-SIMKL_CLIENT_ID=your_client_id_here
-SIMKL_ACCESS_TOKEN=          # filled in by the next step
-TMDB_API_KEY=                # optional
-FRONTEND_URL=http://localhost:3000
-PORT=3001
-NODE_ENV=development
-```
-
-### 4. Get an access token
-
-```bash
+```sh
 node get-simkl-token.js
 ```
 
-The script prints a 5 character code and waits. Open <https://simkl.com/pin>, type the code, approve the app, and the script prints your token. Paste it into `.env` as `SIMKL_ACCESS_TOKEN`.
+it prints a 5 character code and waits. open <https://simkl.com/pin>, type the code, approve the app, and the script prints your token. put it in `.env` as `SIMKL_ACCESS_TOKEN`.
 
-You do this once. Simkl tokens are long lived (they advertise roughly five years) and there is no refresh token to rotate, which is why this project needs no database. The token stays good until you revoke the app at <https://simkl.com/settings/connected-apps/>.
+you do this once. the token stays good until you revoke the app at <https://simkl.com/settings/connected-apps/>. the code expires after 15 minutes, and if the script says **simkl issued a new code**, the poll ran past a rotation. either way, run it again.
 
-Two things that can go wrong here:
+### 3. run it
 
-- **"Simkl issued a new code. Re-run this script."** means the poll ran past the point where Simkl rotated the code. Just run it again.
-- The code expires after 15 minutes. Run it again.
-
-### 5. Run it
-
-```bash
+```sh
 npm run dev     # nodemon, reloads on change
 npm start       # plain node
 curl http://localhost:3001/api/watch/last
 ```
 
-If the token is good you get JSON. If it is not, the server refuses to start and tells you which variable is missing.
+for nicer posters, grab a key from [tmdb's api settings](https://www.themoviedb.org/settings/api) and set `TMDB_API_KEY`. without it, posters come from simkl at 340 px, which is fine for a small widget. tmdb gives 500 px artwork and covers obscure titles better.
 
-### 6. TMDB key (optional)
+### environment
 
-Without it, posters come from Simkl's own CDN at 340px wide, which is fine for a small widget. With it, you get TMDB's 500px artwork and better coverage on obscure titles. Grab one from [TMDB's API settings](https://www.themoviedb.org/settings/api) and drop it in as `TMDB_API_KEY`. The server logs a warning at startup when the key is absent and carries on.
-
-## Environment variables
-
-| Variable | Required | Default | Notes |
-|---|---|---|---|
-| `SIMKL_CLIENT_ID` | yes | | From your Simkl app |
-| `SIMKL_ACCESS_TOKEN` | yes | | From `get-simkl-token.js` |
-| `TMDB_API_KEY` | no | | Falls back to Simkl posters when unset |
-| `FRONTEND_URL` | no | | Origin allowed through CORS |
+| variable | required | default | notes |
+| --- | --- | --- | --- |
+| `SIMKL_CLIENT_ID` | yes | | from your simkl app |
+| `SIMKL_ACCESS_TOKEN` | yes | | from `get-simkl-token.js` |
+| `TMDB_API_KEY` | no | | falls back to simkl posters |
+| `FRONTEND_URL` | no | | the origin allowed through cors |
 | `PORT` | no | `3001` | |
-| `NODE_ENV` | no | `development` | Logged at startup |
+| `NODE_ENV` | no | `development` | logged at startup |
 
-`FRONTEND_URL` holds the origin of the site that will call this, so for me that is my portfolio, not this API's own domain. `http://localhost:3000` is always allowed alongside it so local development works without editing anything.
+`FRONTEND_URL` is the site that calls this, so for me it's my portfolio, not this api's own domain. `http://localhost:3000` is always allowed alongside it.
 
-Worth knowing: requests with no `Origin` header (curl, mobile apps, server side fetches) are allowed through. CORS only restricts browsers, so treat this endpoint as public regardless of what you put in `FRONTEND_URL`. Mine returns what I watched last, which is already on my public site, so that is fine. Do not put anything private behind it.
+### hosting
 
-## Endpoints
+i run it on render's free tier; any node host works. build with `npm install`, start with `npm start`, and set every variable above in the host's dashboard, not in a committed file.
 
-### `GET /api/watch/last`
+the free tier sleeps after 15 idle minutes, and a cold start is long enough that the widget visibly hangs. nothing in this repo keeps it awake, on purpose: a server that pings itself on a free tier is rude and unreliable. an external [uptimerobot](https://uptimerobot.com/) monitor hits `/health` every 5 minutes instead. if the widget feels slow, check the monitor before reading the code.
 
-Returns the most recent item. `type` is either `movie` or `episode`.
+## the shape of it
 
-Movies return `type`, `title`, `year`, `poster_url`, `url` and `watched_at`. Episodes add `show_title`, `season` and `episode`.
+```
+src/
+  index.js            express, cors, the routes and the error shapes
+  simkl.js            the three buckets, sorting, posters, links, the cache
+get-simkl-token.js    the one time pin flow for a token
+.env.example          every variable, with where to get it
+```
 
-`season` is `null` for anime tracked through Simkl itself, because that uses absolute episode numbering (`E366`) with no season component. Shows and anime scrobbled by clients that map to TMDB or TVDB numbering come back as `S01E05` and populate both fields. If you are building a UI on top of this, handle the null.
+## known rough edges
 
-A `503` with `"code": "REAUTH_REQUIRED"` means Simkl rejected the token, almost always because the app was revoked. Re-run `get-simkl-token.js`. This is the one failure that needs a human.
+- **cors is not a lock.** requests with no `Origin` header (curl, apps, server side fetches) are let through, and cors only restricts browsers. treat the endpoint as public. mine returns what i watched last, which is already on my site, so that's fine. don't put anything private behind it.
+- **the cache is per process.** it's in memory, so a restart or a second instance starts cold.
+- **45 days, then everything.** a long break means one slow request for the full history, every 5 minutes, until you watch something.
+- **cold starts.** see [hosting](#hosting).
 
-### `GET /health`
+### when it breaks
 
-Returns `{ "status": "ok", "timestamp": "..." }`. Useful as an uptime monitor target, see below.
+| symptom | cause |
+| --- | --- |
+| `Missing SIMKL_CLIENT_ID` at startup | `.env` not loaded, or the variable isn't set |
+| `Missing SIMKL_ACCESS_TOKEN` | run `node get-simkl-token.js` |
+| `503` with `REAUTH_REQUIRED` | the token was revoked, get a new one |
+| `403` from simkl | you registered a website, not an app, see [step 1](#1-register-a-simkl-app) |
+| `Not allowed by CORS` in the browser | `FRONTEND_URL` doesn't match your site's origin exactly, scheme and port included |
+| `poster_url` is `null` | no tmdb key, and simkl has no poster for that title |
+| stale answer | the 5 minute cache hasn't expired |
 
-### `GET /`
+## credit
 
-Lists the endpoints above. This exists so that pasting the bare domain into a browser tells you what the service is instead of returning a 404 that looks like an outage.
+watch history comes from [simkl](https://simkl.com/). posters come from [tmdb](https://www.themoviedb.org/); this product uses the tmdb api but is not endorsed or certified by tmdb.
 
-Do not point an uptime monitor at it. It is a static object and returns `200` even when the Simkl token is dead, which is exactly the failure you want a monitor to catch. Use `/health`.
+---
 
-Anything else returns `404` with `{ "ok": false, "error": "Not found" }`.
-
-## Deploying
-
-I run this on Render's free tier. Any Node host works.
-
-- Build: `npm install`
-- Start: `npm start`
-- Set every variable from the table above in the host's dashboard, not in a committed file
-
-The free tier spins the instance down after 15 idle minutes, and a cold start takes long enough that the widget visibly hangs. Nothing in this repo keeps the service awake, deliberately, because a self-pinging server on a free tier is both rude and unreliable. I point an external [UptimeRobot](https://uptimerobot.com/) monitor at `/health` every 5 minutes instead.
-
-So if the widget starts feeling slow, check the monitor before you go reading the code.
-
-## How it works
-
-Roughly 350 lines in `src/simkl.js` doing the following:
-
-**Caching.** Responses are cached in memory for 5 minutes. Simkl's rate limits are generous and my watch history does not change every second, so this mostly protects against a busy page hammering the endpoint. Restarting the process clears it.
-
-**Poster lookup.** TMDB first when a key and a `tmdb` id are both present, Simkl's CDN otherwise, `null` if neither has one. Simkl posters are requested as `_m.webp`, which is 340px and roughly 40% smaller than the jpg equivalent.
-
-**Links.** Simkl routes on numeric id, so `/tv/my-show` does not resolve. The URL needs `/tv/1648284/my-show`, and the slug is cosmetic. Anime gets `/anime/`, shows get `/tv/`, movies get `/movies/`.
-
-**Empty buckets.** Simkl returns an empty body rather than `{}` when a bucket has nothing in it, so the response is read as text and checked before parsing. This is the kind of thing you only find out in production.
-
-## Troubleshooting
-
-| Symptom | Cause |
-|---|---|
-| `Missing SIMKL_CLIENT_ID` at startup | `.env` not loaded or variable not set |
-| `Missing SIMKL_ACCESS_TOKEN` | Run `node get-simkl-token.js` |
-| `503` with `REAUTH_REQUIRED` | Token revoked, generate a new one |
-| `403` from Simkl | You registered a website instead of an app, see step 2 |
-| `Not allowed by CORS` in the browser | `FRONTEND_URL` does not match your site's origin exactly, including scheme and port |
-| Posters are `null` | No TMDB key and no Simkl poster for that title |
-| Empty or stale response | Nothing watched in 45 days, or the 5 minute cache has not expired |
+[simkl.ashwin.co.in](https://simkl.ashwin.co.in/api/watch/last) · [ashwin.co.in](https://ashwin.co.in) · [notes](https://inspect.ashwin.co.in) · [x](https://x.com/ashwinnambiar11) · [github](https://github.com/Ashwin-S-Nambiar)
