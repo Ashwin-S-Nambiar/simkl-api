@@ -38,6 +38,7 @@ fork it, point it at your own simkl account, and you get the same thing for your
 | route | what it is |
 | --- | --- |
 | `GET /api/watch/last` | the most recent movie or episode, as above |
+| `GET /api/watch/last/full` | the same item with everything simkl knows about it, see [the full route](#the-full-route) |
 | `GET /health` | `{ "status": "ok", "timestamp": "..." }`, for an uptime monitor |
 | `GET /` | lists the routes, so the bare domain says what the service is instead of a 404 that looks like an outage |
 | anything else | `404` with `{ "ok": false, "error": "Not found" }` |
@@ -46,6 +47,43 @@ fork it, point it at your own simkl account, and you get the same thing for your
 - **season can be null.** anime tracked through simkl itself uses absolute numbering (`E366`) with no season. shows, and anime scrobbled by clients that map to tmdb or tvdb, come back as `S01E05` and fill both fields. if you build a ui on this, handle the null.
 - **one failure needs a human.** a `503` with `"code": "REAUTH_REQUIRED"` means simkl rejected the token, almost always because the app was revoked. run `get-simkl-token.js` again. anything else is a `500` with the message.
 - **don't monitor `/`.** it is a static object and returns `200` even when the token is dead, which is exactly what a monitor should catch. use `/health`.
+
+## the full route
+
+`/api/watch/last/full` answers the same question with more detail, for a richer card. `/api/watch/last` keeps its shape, so anything already reading it carries on.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "type": "episode",
+    "kind": "anime",
+    "title": {
+      "original": "Bleach: Sennen Kessen Hen - Kashin Tan",
+      "english": "Bleach: Thousand-Year Blood War - The Calamity",
+      "display": "Bleach: Thousand-Year Blood War - The Calamity",
+      "main": "Bleach",
+      "subtitle": "Thousand-Year Blood War",
+      "arc": "The Calamity"
+    },
+    "episode": { "season": null, "number": 8, "title": "The End Two World" },
+    "progress": { "watched": 8, "total": 10, "status": "watching" },
+    "ratings": { "imdb": null, "mal": { "rating": 9, "votes": 36535 }, "simkl": { "rating": 9.1, "votes": 279 }, "mine": null },
+    "season_label": "Summer 2026",
+    "studios": ["Pierrot Films"],
+    "links": { "imdb": "...", "mal": "...", "anilist": "...", "tmdb": "..." }
+  }
+}
+```
+
+it also returns `year`, `poster_url`, `fanart_url`, `url`, `watched_at`, `genres`, `runtime`, `certification`, `airing`, `network`, `director`, `overview` and `trailer_url`. anything simkl doesn't have comes back as `null` or an empty list.
+
+- **english titles.** simkl's history only stores the original title, which for anime is romaji. the english one comes from the title's detail page, with the trailing "season 17" simkl adds taken off. `display` is the english title when there is one.
+- **show, subtitle, arc.** `display` is split at the first colon, then at " - ". simkl lists each split season of an anime as its own title, so "the calamity" is there for bleach. one piece is a single 1180 episode entry, so it has no arc, and its arcs only show up in episode titles.
+- **episode titles.** from simkl's episode list. episodes that haven't aired yet are named "Episode 5", and those come back as `null`.
+- **films in the anime list.** an anime film like suzume is `"type": "movie"` with `episode` and `progress` both `null`.
+- **text arrives escaped.** simkl sends `&#039;` for an apostrophe, so titles, episode names and the overview are decoded.
+- **caching.** the item itself follows the 5 minute cache. the detail and episode lists are kept for 12 hours per title, and if simkl fails the last good copy is used.
 
 ## one question, three requests
 
