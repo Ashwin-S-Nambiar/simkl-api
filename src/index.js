@@ -4,7 +4,7 @@ import 'dotenv/config';
 
 import express from 'express';
 import cors from 'cors';
-import { getLastWatched, initialize } from './simkl.js';
+import { getLastWatched, getLastWatchedFull, initialize } from './simkl.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -32,7 +32,7 @@ app.get('/', (_req, res) => {
   res.json({
     ok: true,
     service: 'simkl-api',
-    endpoints: ['/api/watch/last', '/health'],
+    endpoints: ['/api/watch/last', '/api/watch/last/full', '/health'],
     docs: 'https://github.com/Ashwin-S-Nambiar/simkl-api'
   });
 });
@@ -45,29 +45,34 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// Main API endpoint
-app.get('/api/watch/last', async (_req, res) => {
-  try {
-    const data = await getLastWatched();
-    res.json({ ok: true, data });
-  } catch (error) {
-    console.error('[ERROR] API request failed:', error.message);
+function watchRoute(load) {
+  return async (_req, res) => {
+    try {
+      const data = await load();
+      res.json({ ok: true, data });
+    } catch (error) {
+      console.error('[ERROR] API request failed:', error.message);
 
-    // Re-authentication is an operator action, not a transient server fault
-    if (error.code === 'REAUTH_REQUIRED') {
-      return res.status(503).json({
+      // Re-authentication is an operator action, not a transient server fault
+      if (error.code === 'REAUTH_REQUIRED') {
+        return res.status(503).json({
+          ok: false,
+          code: 'REAUTH_REQUIRED',
+          error: error.message
+        });
+      }
+
+      res.status(500).json({
         ok: false,
-        code: 'REAUTH_REQUIRED',
         error: error.message
       });
     }
+  };
+}
 
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
-  }
-});
+// Main API endpoint
+app.get('/api/watch/last', watchRoute(getLastWatched));
+app.get('/api/watch/last/full', watchRoute(getLastWatchedFull));
 
 // 404 handler
 app.use((_req, res) => {

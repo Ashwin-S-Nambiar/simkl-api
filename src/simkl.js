@@ -20,7 +20,11 @@ export class ReauthRequiredError extends Error {
 
 // In-memory cache with 5 minute TTL
 let cache = { data: null, timestamp: 0 };
+let fullCache = { data: null, timestamp: 0 };
+let entryCache = { entry: null, timestamp: 0 };
 const CACHE_TTL = 300000;
+const DETAIL_TTL = 12 * 3600000;
+const detailCache = new Map();
 
 // Only pull recently-touched items so the payload stays small. Simkl has no
 // "sort by recency" parameter, so we fetch a window and sort locally.
@@ -129,6 +133,7 @@ function collectEntries(payload) {
       entries.push({
         watchedAt,
         media,
+        item,
         lastWatched: item.last_watched || null,
         // Anime lives in its own bucket but is shaped like a show, so keep the
         // bucket around - it decides the simkl.com path segment later
@@ -321,6 +326,27 @@ async function fetchMostRecent(dateFrom) {
   return entries[0];
 }
 
+async function getRecentEntry() {
+  const now = Date.now();
+
+  if (entryCache.timestamp && now - entryCache.timestamp < CACHE_TTL) {
+    return entryCache.entry;
+  }
+
+  const dateFrom = new Date(now - RECENT_WINDOW_DAYS * 86400000).toISOString();
+  let entry = await fetchMostRecent(dateFrom);
+
+  // Nothing watched recently - fall back to a full pull so the widget still
+  // shows something rather than going blank after a quiet month
+  if (!entry) {
+    console.log(`[INFO] No activity in ${RECENT_WINDOW_DAYS} days, pulling full history...`);
+    entry = await fetchMostRecent(null);
+  }
+
+  entryCache = { entry, timestamp: Date.now() };
+  return entry;
+}
+
 /**
  * Get last watched item with caching
  * @returns {Promise<Object|null>} Last watched item
@@ -335,15 +361,7 @@ export async function getLastWatched() {
 
   console.log('[INFO] Cache expired or empty, fetching fresh data...');
 
-  const dateFrom = new Date(now - RECENT_WINDOW_DAYS * 86400000).toISOString();
-  let entry = await fetchMostRecent(dateFrom);
-
-  // Nothing watched recently - fall back to a full pull so the widget still
-  // shows something rather than going blank after a quiet month
-  if (!entry) {
-    console.log(`[INFO] No activity in ${RECENT_WINDOW_DAYS} days, pulling full history...`);
-    entry = await fetchMostRecent(null);
-  }
+  const entry = await getRecentEntry();
 
   if (!entry) {
     console.log('[INFO] No watch history found');
@@ -353,6 +371,170 @@ export async function getLastWatched() {
 
   const data = await normaliseEntry(entry);
   cache = { data, timestamp: Date.now() };
+
+  return data;
+}
+
+async function fetchPublic(path, extra = {}) {
+  const response = await fetch(`${SIMKL_API_BASE}${path}?${buildQuery(extra)}`, {
+    headers: { 'User-Agent': USER_AGENT, 'simkl-api-key': CLIENT_ID }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Simkl ${path} request failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function remember(key, load) {
+  const hit = detailCache.get(key);
+  if (hit && Date.now() - hit.timestamp < DETAIL_TTL) return hit.data;
+
+  try {
+    const data = await load();
+    detailCache.set(key, { data, timestamp: Date.now() });
+    return data;
+  } catch (error) {
+    console.warn(`[WARN] ${error.message}`);
+    return hit?.data ?? null;
+  }
+}
+
+function decodeEntities(text) {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function englishTitle(detail) {
+  const en = decodeEntities(detail?.en_title)?.replace(/\s+(season\s+\d+|s\d+|part\s+\d+|cour\s+\d+)$/i, '').trim();
+  return en || null;
+}
+
+function splitTitle(name) {
+  const colon = /^(.+?):\s+(.+)$/.exec(name);
+  if (!colon) {
+    const dash = /^(.+?)\s+-\s+(.+)$/.exec(name);
+    return dash
+      ? { main: dash[1], subtitle: null, arc: dash[2] }
+      : { main: name, subtitle: null, arc: null };
+  }
+
+  const dash = /^(.+?)\s+-\s+(.+)$/.exec(colon[2]);
+  return dash
+    ? { main: colon[1], subtitle: dash[1], arc: dash[2] }
+    : { main: colon[1], subtitle: colon[2], arc: null };
+}
+
+function findEpisodeTitle(episodes, parsed) {
+  if (!Array.isArray(episodes) || !parsed) return null;
+
+  const match = episodes.find((e) =>
+    e.type === 'episode' &&
+    e.episode === parsed.episode &&
+    (parsed.season == null || e.season == null || e.season === parsed.season)
+  );
+
+  const title = decodeEntities(match?.title)?.trim();
+  return title && !/^episode\s+\d+$/i.test(title) ? title : null;
+}
+
+function pickRating(ratings, key) {
+  const rating = ratings?.[key];
+  return rating?.rating != null ? { rating: rating.rating, votes: rating.votes ?? null } : null;
+}
+
+function buildLinks(ids) {
+  return {
+    imdb: ids.imdb ? `https://www.imdb.com/title/${ids.imdb}` : null,
+    mal: ids.mal ? `https://myanimelist.net/anime/${ids.mal}` : null,
+    anilist: ids.anilist ? `https://anilist.co/anime/${ids.anilist}` : null,
+    tmdb: ids.tmdb ? `https://www.themoviedb.org/${ids.tmdb_type === 'movie' ? 'movie' : 'tv'}/${ids.tmdb}` : null
+  };
+}
+
+async function enrichEntry(entry) {
+  const { media, item, watchedAt, lastWatched, bucket } = entry;
+  const kind = bucket === 'anime' ? 'anime' : entry.isMovie ? 'movie' : 'tv';
+  const isFilm = entry.isMovie || item?.anime_type === 'movie';
+  const simklId = media.ids?.simkl ?? media.ids?.simkl_id;
+  const detailPath = kind === 'anime' ? 'anime' : kind === 'movie' ? 'movies' : 'tv';
+  const parsed = isFilm ? null : parseEpisodeMarker(lastWatched);
+
+  const [detail, episodes, posterUrl] = await Promise.all([
+    simklId ? remember(`detail:${detailPath}:${simklId}`, () => fetchPublic(`/${detailPath}/${simklId}`, { extended: 'full' })) : null,
+    simklId && parsed ? remember(`episodes:${detailPath}:${simklId}`, () => fetchPublic(`/${detailPath}/episodes/${simklId}`)) : null,
+    fetchPoster(isFilm ? 'movie' : 'tv', media)
+  ]);
+
+  const english = englishTitle(detail);
+  const display = english || decodeEntities(media.title);
+  const ids = { ...(detail?.ids ?? {}), ...(media.ids ?? {}), tmdb_type: isFilm ? 'movie' : 'tv' };
+  const trailer = detail?.trailers?.find((t) => t.youtube);
+
+  console.log(`[INFO] Enriched: ${display}${parsed ? ` E${parsed.episode}` : ''}`);
+
+  return {
+    type: isFilm ? 'movie' : 'episode',
+    kind,
+    title: {
+      original: decodeEntities(media.title),
+      english,
+      display,
+      ...splitTitle(display)
+    },
+    episode: parsed
+      ? { season: parsed.season, number: parsed.episode, title: findEpisodeTitle(episodes, parsed) }
+      : null,
+    year: media.year ?? detail?.year ?? null,
+    poster_url: posterUrl,
+    fanart_url: detail?.fanart ? `https://simkl.in/fanart/${detail.fanart}_medium.webp` : null,
+    url: buildSimklUrl(kind === 'anime' ? 'anime' : isFilm ? 'movies' : 'tv', media),
+    watched_at: watchedAt,
+    progress: isFilm
+      ? null
+      : {
+          watched: item?.watched_episodes_count ?? null,
+          total: item?.total_episodes_count ?? detail?.total_episodes ?? null,
+          status: item?.status ?? null
+        },
+    ratings: {
+      imdb: pickRating(detail?.ratings, 'imdb'),
+      mal: pickRating(detail?.ratings, 'mal'),
+      simkl: pickRating(detail?.ratings, 'simkl'),
+      mine: item?.user_rating ?? null
+    },
+    genres: detail?.genres ?? [],
+    runtime: detail?.runtime ?? null,
+    certification: detail?.certification ?? null,
+    airing: detail?.status ?? null,
+    season_label: detail?.season_name_year ?? null,
+    network: detail?.network ?? null,
+    studios: (detail?.studios ?? []).map((s) => s.name),
+    director: detail?.director ?? null,
+    overview: decodeEntities(detail?.overview) ?? null,
+    trailer_url: trailer ? `https://www.youtube.com/watch?v=${trailer.youtube}` : null,
+    links: buildLinks(ids)
+  };
+}
+
+export async function getLastWatchedFull() {
+  const now = Date.now();
+
+  if (fullCache.data && now - fullCache.timestamp < CACHE_TTL) {
+    return fullCache.data;
+  }
+
+  const entry = await getRecentEntry();
+  const data = entry ? await enrichEntry(entry) : null;
+  fullCache = { data, timestamp: Date.now() };
 
   return data;
 }
