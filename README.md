@@ -118,11 +118,11 @@ for nicer posters, grab a key from [tmdb's api settings](https://www.themoviedb.
 | `SIMKL_CLIENT_ID` | yes | | from your simkl app |
 | `SIMKL_ACCESS_TOKEN` | yes | | from `get-simkl-token.js` |
 | `TMDB_API_KEY` | no | | falls back to simkl posters |
-| `FRONTEND_URL` | no | | the origin allowed through cors |
+| `FRONTEND_URL` | no | | the origins allowed through cors, comma separated |
 | `PORT` | no | `3001` | |
 | `NODE_ENV` | no | `development` | logged at startup |
 
-`FRONTEND_URL` is the site that calls this, so for me it's my portfolio, not this api's own domain. `http://localhost:3000` is always allowed alongside it.
+`FRONTEND_URL` is the site that calls this, so for me it's my portfolio, not this api's own domain. list more than one with commas, like `https://ashwin.co.in,https://v2.ashwin.co.in`. `http://localhost:3000` is always allowed alongside them.
 
 ### hosting
 
@@ -155,7 +155,7 @@ get-simkl-token.js    the one time pin flow for a token
 | `Missing SIMKL_ACCESS_TOKEN` | run `node get-simkl-token.js` |
 | `503` with `REAUTH_REQUIRED` | the token was revoked, get a new one |
 | `403` from simkl | you registered a website, not an app, see [step 1](#1-register-a-simkl-app) |
-| `Not allowed by CORS` in the browser | `FRONTEND_URL` doesn't match your site's origin exactly, scheme and port included |
+| a cors error in the browser | no entry in `FRONTEND_URL` matches your site's origin exactly, scheme and port included |
 | `poster_url` is `null` | no tmdb key, and simkl has no poster for that title |
 | stale answer | the 5 minute cache hasn't expired |
 
